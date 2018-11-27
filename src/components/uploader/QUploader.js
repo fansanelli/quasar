@@ -11,12 +11,79 @@ import QItemMain from '../list/QItemMain.js'
 import QItemTile from '../list/QItemTile.js'
 import QSlideTransition from '../slide-transition/QSlideTransition.js'
 import { stopAndPrevent } from '../../utils/event.js'
+import exif from 'exif-js'
 
 function initFile (file) {
   file.__doneUploading = false
   file.__failed = false
   file.__uploaded = 0
   file.__progress = 0
+}
+
+function readFile (file) {
+  return new Promise(resolve => {
+    let reader = new FileReader()
+    reader.onload = e => resolve(e.target.result)
+    reader.readAsDataURL(file)
+  })
+}
+
+function createImage (data) {
+  return new Promise(resolve => {
+    const img = new Image()
+    img.onload = () => resolve(img)
+    img.src = data
+  })
+}
+
+function rotate (type, img) {
+  return new Promise(resolve => {
+    const canvas = document.createElement('canvas')
+
+    exif.getData(img, function () {
+      const orientation = exif.getAllTags(this).Orientation
+
+      if ([5, 6, 7, 8].indexOf(orientation) > -1) {
+        canvas.width = img.height
+        canvas.height = img.width
+      }
+      else {
+        canvas.width = img.width
+        canvas.height = img.height
+      }
+
+      const ctx = canvas.getContext('2d')
+
+      switch (orientation) {
+        case 2:
+          ctx.transform(-1, 0, 0, 1, img.width, 0)
+          break
+        case 3:
+          ctx.transform(-1, 0, 0, -1, img.width, img.height)
+          break
+        case 4:
+          ctx.transform(1, 0, 0, -1, 0, img.height)
+          break
+        case 5:
+          ctx.transform(0, 1, 1, 0, 0, 0)
+          break
+        case 6:
+          ctx.transform(0, 1, -1, 0, img.height, 0)
+          break
+        case 7:
+          ctx.transform(0, -1, -1, 0, img.height, img.width)
+          break
+        case 8:
+          ctx.transform(0, -1, 1, 0, 0, img.width)
+          break
+        default:
+          ctx.transform(1, 0, 0, 1, 0, 0)
+      }
+
+      ctx.drawImage(img, 0, 0, img.width, img.height)
+      canvas.toBlob(resolve, type)
+    })
+  })
 }
 
 export default {
@@ -205,20 +272,17 @@ export default {
           this.queue.push(file)
         }
         else {
-          const reader = new FileReader()
-          let p = new Promise((resolve, reject) => {
-            reader.onload = e => {
-              let img = new Image()
-              img.src = e.target.result
+          let p = readFile(file)
+            .then(createImage)
+            .then(rotate.bind(undefined, file.type))
+            .then(blob => {
+              const img = new Image()
+              img.src = URL.createObjectURL(blob)
               file.__img = img
               this.queue.push(file)
               this.__computeTotalSize()
-              resolve(true)
-            }
-            reader.onerror = e => { reject(e) }
-          })
+            })
 
-          reader.readAsDataURL(file)
           filesReady.push(p)
         }
 
